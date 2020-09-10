@@ -11,6 +11,8 @@ UUtilityAIComponent::UUtilityAIComponent()
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
 
+	bCanRunWithoutPawn = true;
+
 	// ...
 }
 
@@ -134,7 +136,7 @@ UUtilityAIAction* UUtilityAIComponent::ReceiveComputeBestAction_Implementation(A
 
 	for (UUtilityAIAction* Action : InstancedActions)
 	{
-		Action->LastCanRun = Action->CanRun(Controller, Pawn);
+		Action->LastCanRun = !Action->IsMarkedForDeath() && Action->CanRun(Controller, Pawn);
 		if (!Action->LastCanRun)
 			continue;
 		Action->LastScore = ScoreFilter(Action, Action->Score(Controller, Pawn));
@@ -169,12 +171,18 @@ void UUtilityAIComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 	APawn* Pawn = Controller->GetPawn();
 
-	UUtilityAIAction* BestAction = ComputeBestAction(Controller, Pawn);
 
-	OnUtilityAIActionChoosen.Broadcast(BestAction);
+	UUtilityAIAction* BestAction = nullptr;
+
+	if (Pawn || bCanRunWithoutPawn)
+	{
+		BestAction = ComputeBestAction(Controller, Pawn);
+	}
+
 
 	if (BestAction)
 	{
+		OnUtilityAIActionChoosen.Broadcast(BestAction);
 		if (LastAction != BestAction)
 		{
 			float CurrentTime = GetWorld()->GetTimeSeconds();
@@ -201,18 +209,19 @@ void UUtilityAIComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		LastAction = BestAction;
 		LastPawn = Pawn;
 		OnUtilityAIActionTicked.Broadcast(BestAction);
+		return;
 	}
-	else
+
+	OnUtilityAIActionNotAvailable.Broadcast();
+	if (LastAction)
 	{
-		OnUtilityAIActionNotAvailable.Broadcast();
-		if (LastAction)
-		{
-			OnUtilityAIActionChanged.Broadcast(nullptr, LastAction);
-			LastAction->Exit(Controller, LastPawn);
-			LastAction = nullptr;
-			LastPawn = nullptr;
-		}
+		OnUtilityAIActionChanged.Broadcast(nullptr, LastAction);
+		LastAction->Exit(Controller, LastPawn);
+		LastAction->Resurrect();
+		LastAction = nullptr;
+		LastPawn = nullptr;
 	}
+
 }
 
 TArray<UUtilityAIAction*> UUtilityAIComponent::GetActionInstances() const
@@ -230,7 +239,7 @@ UUtilityAIAction* UUtilityAIComponent::GetActionInstanceByClass(TSubclassOf<UUti
 	return nullptr;
 }
 
-UUtilityAIAction*  UUtilityAIComponent::GetCurrentActionInstance() const
+UUtilityAIAction* UUtilityAIComponent::GetCurrentActionInstance() const
 {
 	return LastAction;
 }
